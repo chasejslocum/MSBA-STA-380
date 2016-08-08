@@ -1,0 +1,430 @@
+---
+title: "STA 380 - Exercises 1"
+author: "Chase Slocum"
+date: "August 5, 2016"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, comment=NA)
+```
+
+## Probability Practice
+
+#### Part A
+
+Given the law of total probability $P\left(A\right)=\sum_{i=1}^{n} P\left(A|B_{i}\right) P\left(B_{i}\right)$, the probability of yes among truthful answers must be:
+
+$$P\left(Yes\right) = P\left(Yes|Truthful\right)*P\left(Truthful\right) + P\left(Yes|Random\right)*P\left(Random\right)$$
+
+Knowns:  
+$P\left(Yes\right) =$ .65  
+$P\left(Truthful\right) =$ .7  
+$P\left(Yes|Random\right) =$ .5  
+$P\left(Random\right) =$ .3  
+
+Unknown:  
+$P\left(Yes|Truthful\right) =$ ?  
+
+$$.65 = P\left(Yes|Truthful\right)*.6 + .5*.3$$
+
+$$P\left(Yes|Truthful\right) = .71$$
+
+<br><br>
+
+#### Part B
+
+Given Bayes' Rule, the probability of having the disease if someone tests positive is:
+
+$$P\left(Disease|Positive\right)=\frac{P\left(Disease\right)*P\left(Positive|Disease\right)}{P\left(Positive\right)}$$
+
+Knowns:  
+$P\left(Positive|Disease\right) =$ .993  
+$P\left(Negative|Healthy\right) =$ .9999  
+$P\left(Positive|Healthy\right) =$ .0001  
+$P\left(Disease\right) =$ .000025  
+$P\left(Healthy\right) =$ .999975  
+$P\left(Positive\right) = P\left(Positive|Healthy\right)*P\left(Healthy\right) + P\left(Positive|Disease\right)*P\left(Disease\right)$
+
+Unknown:  
+$P\left(Disease|Positive\right) =$ ?
+<br><br>
+
+$$P\left(Disease|Positive\right)=\frac{P\left(Disease\right)*P\left(Positive|Disease\right)}{P\left(Positive|Healthy\right)*P\left(Healthy\right) + P\left(Positive|Disease\right)*P\left(Disease\right)}$$
+$$P\left(Disease|Positive\right)=\frac{.000025*.993}{.0001*.99975 + .993*.000025}$$
+$$P\left(Disease|Positive\right)=.1989183$$
+
+Given that the probability of having the disease when someone tests positive is less than 20%, the implementation of this test would lead to more false positives than true positives and would cause a lot of unecessary worrying in addition to money and time lost confirming a positive result.
+
+<br><br>
+
+## Exploratory Analysis: green buildings
+
+The stats guru's conclusion is far from definitive. The guru's intuition to look at the median as a measure that is more robust against outliers is correct. However, narrowing the decision point to the median ignores a variety of factors. 
+
+First of all, simply looking at a boxplot reveals that there is significant variability in the rent per square foot for both green and non-green certified buildings.
+
+```{r}
+greenbuildings = read.csv('https://raw.githubusercontent.com/chasejslocum/MSBA-STA-380/master/Exercises_1/greenbuildings.csv')
+
+greenbuildings$green_rating = factor(greenbuildings$green_rating)
+greenbuildings$class_a = factor(greenbuildings$class_a)
+
+plot(greenbuildings$green_rating, greenbuildings$Rent, xlab="Green Rating", ylab="Rent")
+```
+
+Clearly, there is significant overlap in the range and distributions of rent for both types of buildings. This alone raises serious doubts about the validity of the guru's conclusion.
+
+There is also the issue of confounding factors. By just considering medians, the guru has ignored the possibility that factors that are correlated with a green rating are driving the premium in rent. One such factor is the indicator for class A building quality. Intuitively, higher quality buildings will be able to charge more for rent. Looking at a boxplot of class_a versus rent, class A buildings tend to charge more for rent, albeit by a very slight amount.
+
+```{R}
+plot(greenbuildings$class_a, greenbuildings$Rent, xlab="Class A", ylab="Rent")
+class_a = subset(greenbuildings, greenbuildings$class_a==1)
+lower = subset(greenbuildings, greenbuildings$class_a==0)
+green = subset(greenbuildings, greenbuildings$green_rating==1)
+reg = subset(greenbuildings, greenbuildings$green_rating==0)
+```
+
+Following the guru's example to look at medians, the median for class A buildings is `r median(class_a$Rent)` while the median for lower quality buildings is `r median(lower$Rent)`. 
+
+How does this relate to green ratings? Green rated buildings tend to be class A buildings:
+
+```{r}
+compare=xtabs(~class_a + green_rating, data=greenbuildings)
+compare
+portion = compare[2,2]/sum(compare[,2])
+class_a_g = subset(class_a, green_rating==1)
+class_a_r = subset(class_a, green_rating==0)
+lower_g = subset(lower, lower$green_rating==1)
+lower_r = subset(lower, lower$green_rating==0)
+```
+
+In fact, `r portion` of all green buildings are class A buildings. The median price for green class A buildings is `r median(class_a_g$Rent)` while the median price for non-green class A buildings is `r median(class_a_r$Rent)`. The benefit of going green under the guru's criteria is clearly lost among class A buildings. Among non-class A buildings, the median rent for green buildings is  `r median(lower_g$Rent)` and for non-green buildings it is `r median(lower_r$Rent)`, so if the building is not class A, there might be potential for the monetary benefits to be present. Similar relationships exist for other variables, including amenities.
+
+If the guru wishes to improve their predictions, they need to revisit their analysis and attempt to account for these other confounding variables, The guru then needs to indentify where the developer's building falls among the different criteria to determine if going green is worth the investment.
+
+<br><br>
+
+## Bootstrapping
+
+```{r,  message=FALSE, warning=FALSE}
+library(foreach)
+library(fImport)
+library(mosaic)
+
+mystocks = c("SPY", "TLT", "LQD", "EEM", "VNQ")
+myprices = yahooSeries(mystocks, from='2010-01-01', to='2016-08-05')
+
+YahooPricesToReturns = function(series) {
+	mycols = grep('Adj.Close', colnames(series))
+	closingprice = series[,mycols]
+	N = nrow(closingprice)
+	percentreturn = as.data.frame(closingprice[2:N,]) / as.data.frame(closingprice[1:(N-1),]) - 1
+	mynames = strsplit(colnames(percentreturn), '.', fixed=TRUE)
+	mynames = lapply(mynames, function(x) return(paste0(x[1], ".PctReturn")))
+	colnames(percentreturn) = mynames
+	as.matrix(na.omit(percentreturn))
+}
+
+# Compute the returns from the closing prices
+myreturns = YahooPricesToReturns(myprices)
+
+#set time
+n_days = 20
+```
+
+```{r}
+# Now simulate many different possible trading years!
+set.seed(10)
+simSPY = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(1, 0, 0, 0, 0)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_SPY = quantile(simSPY[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_SPY = quantile(simSPY[,n_days], 0.95) - 100000
+av_SPY = mean(simSPY[,n_days]-100000)
+
+set.seed(10)
+simTLT = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0, 1, 0, 0, 0)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_TLT = quantile(simTLT[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_TLT = quantile(simTLT[,n_days], 0.95) - 100000
+av_TLT = mean(simTLT[,n_days]-100000)
+
+set.seed(10)
+simLQD = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0, 0, 1, 0, 0)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_LQD = quantile(simLQD[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_LQD = quantile(simLQD[,n_days], 0.95) - 100000
+av_LQD = mean(simLQD[,n_days]-100000)
+
+set.seed(10)
+simEEM = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0, 0, 0, 1, 0)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_EEM = quantile(simEEM[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_EEM = quantile(simEEM[,n_days], 0.95) - 100000
+av_EEM = mean(simEEM[,n_days]-100000)
+
+set.seed(10)
+simVNQ = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0, 0, 0, 0, 1)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_VNQ = quantile(simVNQ[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_VNQ = quantile(simVNQ[,n_days], 0.95) - 100000
+av_VNQ = mean(simVNQ[,n_days]-100000)
+```
+
+The following chart displays the results of five different Monte Carlo simulations. Each one took an individual ETF and simulated holding it for 20 days with a $100,000 initial investment. The chart details the average return and the amounts for which the investor stands a 5% chance of gaining/losing that much or more.
+
+Ticker | Average | 5% chance | 5% chance
+------ | ------- | --------- | -----------
+SPY    | `r av_SPY` | `r loss_SPY` | `r gain_SPY`             
+TLT    | `r av_TLT` | `r loss_TLT` | `r gain_TLT`             
+LQD    | `r av_LQD` | `r loss_LQD` | `r gain_LQD`             
+EEM    | `r av_EEM` | `r loss_EEM` | `r gain_EEM`             
+VNQ    | `r av_VNQ` | `r loss_VNQ` | `r gain_VNQ`  
+
+Clearly, the safer ETF's are the treasury bonds and the coporate bonds. The domestic equities are a moderate risk/reward fund with EEM and VNQ being riskier investments.
+
+
+
+Consequently, the safe portfolio will comprise 40% in LQD, 40% in TLT, and 20% in SPY.  
+The aggressive portfolio will comprise 40% in EEM, 40% in VNQ, and 20% in SPY.
+
+```{r}
+#even sim
+set.seed(10)
+simeven = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_even = quantile(simeven[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_even = quantile(simeven[,n_days], 0.95) - 100000
+av_even = mean(simeven[,n_days]-100000)
+std_even = sd(simeven[,n_days])
+loss_even_25 = quantile(simeven[,n_days], 0.25) - 100000
+gain_even_25 = quantile(simeven[,n_days], 0.75) - 100000
+
+#safe sim
+set.seed(10)
+simsafe = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.2, 0.4, 0.4, 0, 0)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_safe = quantile(simsafe[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_safe = quantile(simsafe[,n_days], 0.95) - 100000
+av_safe = mean(simsafe[,n_days]-100000)
+std_safe = sd(simsafe[,n_days])
+loss_safe_25 = quantile(simsafe[,n_days], 0.25) - 100000
+gain_safe_25 = quantile(simsafe[,n_days], 0.75) - 100000
+
+#Aggressive sim
+set.seed(10)
+simagg = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.2, 0, 0, 0.4, 0.4)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(myreturns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		wealthtracker[today] = totalwealth
+    holdings = weights*totalwealth
+	}
+	wealthtracker
+}
+
+# Calculate 5% value at risk
+loss_agg = quantile(simagg[,n_days], 0.05) - 100000
+#we have a 5% probability of losing above line or more
+gain_agg = quantile(simagg[,n_days], 0.95) - 100000
+av_agg = mean(simagg[,n_days]-100000)
+std_agg = sd(simagg[,n_days])
+loss_agg_25 = quantile(simagg[,n_days], 0.25) - 100000
+gain_agg_25 = quantile(simagg[,n_days], 0.75) - 100000
+```
+
+The following chart shows the value-at-risk for each portfolio after a 4-week trading period:  
+
+Portfolio | Value-at-risk 
+--------- | --------------
+Even      | `r loss_even`            
+Safe      | `r loss_safe`           
+Aggressive| `r loss_agg`  
+
+This is a breakdown of the returns of each portfolio that can be used to determine the best investment strategy. It includes the average return, standard deviation of returns, and 90% confidence interval for returns.  
+
+Portfolio | Average | standard Dev. | 5% Loss | 5% Gain
+--------- | ------- | ------------- | ------- | --------
+Even      | `r av_even` | `r std_even` | `r loss_even` | `r gain_even`     
+Safe      | `r av_safe` | `r std_safe` | `r loss_safe` | `r gain_safe`     
+Aggressive| `r av_agg`  | `r std_agg` | `r loss_agg` | `r gain_agg`
+
+
+<br><br>
+
+## Market Segmentation
+
+```{r, message=FALSE, warning='FALSE'}
+library(flexclust)
+sm = read.csv('https://raw.githubusercontent.com/chasejslocum/MSBA-STA-380/master/Exercises_1/social_marketing.csv', row.names=1)
+#sm=sm[,-1]
+#dim(sm)
+#head(sm)
+s=sm/rowSums(sm)
+
+# Scaled per-document phrase frequencies
+Z = scale(s)
+set.seed(11)
+
+clus = foreach(i=2:20, .combine='c') %do% {
+	
+kmeansPP = cclust(Z, k=i, control=list(initcent="kmeanspp"))
+
+# This package has a different interface for accessing model output
+#parameters(kmeansPP)
+
+#print(apply(parameters(kmeansPP),1,function(x) colnames(Z)[order(x, decreasing=TRUE)[1:10]]))
+
+# Roll our own function
+centers = parameters(kmeansPP)
+kpp_residualss = foreach(j=1:nrow(Z), .combine='c') %do% {
+	x = Z[j,]
+	a = kmeansPP@cluster[i]
+	m = centers[a,]
+	sum((x-m)^2)
+}
+
+sum(kpp_residualss)
+}
+#plot(clus)
+```
+
+Via kmeans++, I was able to indentify 6 unique customer segments. 6 clusters turned out to be a good balance between shrinking errors and creating distinct classifiable clusters. These are the cluster sizes:  
+
+```{r}
+set.seed(11)
+kmeansPP = cclust(Z, k=6, control=list(initcent="kmeanspp"))
+
+# This package has a different interface for accessing model output
+#parameters(kmeansPP)
+kmeansPP@clusinfo[,1]
+```
+
+These are the top words for each cluster:  
+
+```{r}
+print(apply(parameters(kmeansPP),1,function(x) colnames(Z)[order(x, decreasing=TRUE)[1:10]]))
+
+# Roll our own function
+centers = parameters(kmeansPP)
+kpp_residualss = foreach(j=1:nrow(Z), .combine='c') %do% {
+	x = Z[j,]
+	a = kmeansPP@cluster[i]
+	m = centers[a,]
+	sum((x-m)^2)
+}
+
+#sum(kpp_residualss)
+```
+
+It is clear that most of NutrientH2O's customers demonstrate interests in being active and engaged. The larger clusters (1,3,5,6) have many interests associated with being informed/up-to-date (e.g. current events, politics, fashion). Looking at individual clusters, it appears 1 is related to people interested in the outdoors and being active. In contrast, cluster 2 seems to be populated by more artisitically driven customers, but it is also one of the smaller clusters. The larger clusters (5 and 6) are distinct from each other. Whle both seem to have interests in keeping up with current events or the news, cluster 5 seems more driven by a customer that is a social media user as demonstrated by the prevalence of "chatter" and "photo sharing". On the other hand, cluster 6 seems to be more related to parents interested in investing time and money in their family as evidenced by "religion", "food", "automotive", and "family".
