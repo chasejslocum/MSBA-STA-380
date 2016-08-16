@@ -1,0 +1,270 @@
+---
+title: "Exercises02_Slocum"
+author: "Chase Slocum"
+date: "August 12, 2016"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, comment=NA)
+```
+
+## Flights at ABIA
+
+```{r}
+flights = read.csv('ABIA.csv')
+arr = subset(flights, Dest=='AUS')
+dep = subset(flights, Dest!='AUS')
+arr = arr[,c(9,15)]
+dep = dep[,c(9,16)]
+arr$delay = ifelse(arr$ArrDelay>0, 'Delayed', 'On Time')
+dep$delay = ifelse(dep$DepDelay>0, 'Delayed', 'On Time')
+arrdelayed = subset(arr, delay=='Delayed')
+depdelayed = subset(dep, delay=='Delayed')
+
+totalarr = aggregate(arr$delay, list(carrier = arr$UniqueCarrier), length)
+delayedarr = aggregate(arrdelayed$delay, list(carrier = arrdelayed$UniqueCarrier), length)
+rownames(totalarr) = totalarr[,1]
+rownames(delayedarr) = delayedarr[,1]
+carriers = totalarr[,1]
+totalarr = totalarr[,-1]
+delayedarr = delayedarr[,-1]
+
+totaldep = aggregate(dep$delay, list(carrier = dep$UniqueCarrier), length)
+delayeddep = aggregate(depdelayed$delay, list(carrier = depdelayed$UniqueCarrier), length)
+rownames(totaldep) = totaldep[,1]
+rownames(delayeddep) = delayeddep[,1]
+totaldep = totaldep[,-1]
+delayeddep = delayeddep[,-1]
+
+percentdep = as.matrix(delayeddep/totaldep)
+rownames(percentdep) = carriers
+colnames(percentdep) = 'Departures'
+
+percentarr = as.matrix(delayedarr/totalarr)
+rownames(percentarr) = carriers
+colnames(percentarr) = 'Arrivals'
+
+delayss = t(cbind(percentdep, percentarr))*100
+barplot(delayss, main="Percent delays by Carrier at ABIA", xlab="Carrier", ylab="Percent of flights delayed", col=c("darkblue","yellow"),  beside=TRUE)
+legend('topleft', rownames(delayss), fill=c("darkblue","yellow"))
+```
+
+Overwhelmingly, flights are more often delayed in arriving to ABIA than upon departing regardless of carrier with the notable exception of WN (Southwest).
+
+## Author Attribution
+
+I used two different models:
+
+* A Naive Bayes model using term frequencies
+* A distance vector space model using TFIDF
+
+Both models were built using the tm package in r. The vector space model compared the distance between each test set document and the vector for each author of the average TFIDF for each word. The accuracies of the models are below:
+
+```{r, message=FALSE}
+library(tm)
+library(foreach)
+```
+```{r}
+readerPlain = function(fname){
+				readPlain(elem=list(content=readLines(fname)), 
+							id=fname, language='en') }
+
+author_dirs = Sys.glob('ReutersC50/C50train/*')
+author_dirs = author_dirs
+file_list = NULL
+labels = NULL
+for(author in author_dirs) {
+	author_name = substring(author, first=21)
+	files_to_add = Sys.glob(paste0(author, '/*.txt'))
+	file_list = append(file_list, files_to_add)
+	labels = append(labels, rep(author_name, length(files_to_add)))
+}
+
+# Need a more clever regex to get better names here
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+
+# Preprocessing
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM = DocumentTermMatrix(my_corpus)
+
+#create TFIDF for later
+DTM_TFIDF  = DocumentTermMatrix(my_corpus, control = list(weighting = function(x) weightTfIdf(x, normalize = TRUE)))
+
+## You can inspect its entries...
+DTM = removeSparseTerms(DTM, 0.975)
+
+# Now a dense matrix
+X = as.matrix(DTM)
+
+smooth_count = 1/nrow(X)
+
+#multinomial probability vector for each author
+train = foreach(i=1:50, .combine='rbind') %do% {
+  startdoc = (50*(i-1)) + 1
+  enddoc = startdoc+49
+  currdocs = X[startdoc:enddoc,]
+	w = colSums(currdocs + smooth_count)
+  w = w/sum(w)
+	w
+}
+
+authors = unique(labels)
+rownames(train) = authors
+###########################################
+
+author_dirs = Sys.glob('ReutersC50/C50test/*')
+author_dirs = author_dirs
+file_list = NULL
+labels = NULL
+for(author in author_dirs) {
+	author_name = substring(author, first=20)
+	files_to_add = Sys.glob(paste0(author, '/*.txt'))
+	file_list = append(file_list, files_to_add)
+	labels = append(labels, rep(author_name, length(files_to_add)))
+}
+
+# Need a more clever regex to get better names here
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+
+# Preprocessing
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM = DocumentTermMatrix(my_corpus)
+
+#create TFIDF for later
+DTM_TFIDF_test  = DocumentTermMatrix(my_corpus, control = list(weighting = function(x) weightTfIdf(x, normalize = TRUE)))
+
+
+# Now a dense matrix
+X_test = as.matrix(DTM)
+
+#keep only common words
+common_words = colnames(X_test)[colnames(X_test) %in% colnames(X)]
+X_test <- X_test[, common_words]
+
+#get probability for each one
+test = foreach(i=1:2500, .combine='cbind') %do% {
+  currdoc = X_test[i,]
+	prob = foreach(j=1:50, .combine='rbind') %do% {
+	  sum(currdoc*log(train[j,]))
+	}
+	prob
+}
+
+prediction = foreach(i=1:2500, .combine='rbind') %do% {
+  which.max(test[,i])
+}
+
+results = cbind(prediction,authors[prediction[,1]], labels, ifelse(authors[prediction[,1]]==labels,1,0))
+colnames(results) = c('pred.auth.id', 'predicted','actual','correct')
+
+acc = sum(as.numeric(results[,4]))/nrow(results)
+
+###########Vector space - TFIDF################
+DTM_TFIDF = removeSparseTerms(DTM_TFIDF, 0.975)
+
+X_TFIDF = as.matrix(DTM_TFIDF)
+X_TFIDF_test = as.matrix(DTM_TFIDF_test)
+
+common_words = colnames(X_TFIDF_test)[colnames(X_TFIDF_test) %in% colnames(X_TFIDF)]
+X_TFIDF_test <- X_TFIDF_test[, common_words]
+
+train2 = foreach(i=1:50, .combine='rbind') %do% {
+  startdoc = (50*(i-1)) + 1
+  enddoc = startdoc+49
+  currdocs = X[startdoc:enddoc,]
+	w = colMeans(currdocs)
+	w
+}
+
+my_cosine = function(v1, v2) {
+  sum(v1*v2) / {sqrt(sum(v1)^2) * sqrt(sum(v2^2))}
+}
+
+test2 = foreach(i=1:2500, .combine='cbind') %do% {
+  currdoc = X_TFIDF_test[i,]
+	coss = foreach(j=1:50, .combine='rbind') %do% {
+	  my_cosine(currdoc, train2[j,])
+	}
+	coss
+}
+
+prediction2 = foreach(i=1:2500, .combine='rbind') %do% {
+  which.max(test2[,i])
+}
+
+results2 = cbind(prediction2,authors[prediction2[,1]], labels, ifelse(authors[prediction2[,1]]==labels,1,0))
+colnames(results2) = c('pred.auth.id', 'predicted','actual','correct')
+
+acc2 = sum(as.numeric(results2[,4]))/nrow(results2)
+
+table = rbind(acc, acc2)
+rownames(table) = c('Naive Bayes: Term Frequency', 'Vector Space: TFIDF')
+colnames(table)='Accuracy'
+table
+```
+
+Clearly, the Naive Bayes peformed better, so that is my model of choice. The most common confused authors are:
+
+```{r}
+wrong1 = subset(results, results[,4]==0)
+wrong2 = subset(results2, results2[,4]==0)
+
+mistakes1 = as.matrix(paste(wrong1[,2], wrong1[,3], sep=' & '))
+mistakes2 = as.matrix(paste(wrong2[,2], wrong2[,3], sep=' & '))
+
+mistakes=rbind(mistakes1, mistakes2)
+colnames(mistakes)='confused'
+counts = xtabs(~., mistakes)
+orcounts = counts[order(-counts)]
+names(orcounts)[1:10]
+```
+
+
+## Association Rule Mining
+
+```{r, message=FALSE}
+detach(package:tm, unload=TRUE)
+library(arules)
+```
+
+
+In building association rules for the grocery baskets, to use .3 as my confidence threshold and 2.75 as my lift threshold because I was interested in finding a few very effective rules that had enough confidence to suggest the relationship was more than just coincidence. It was clear that many of the rules were being driven by consistently purchased items like milk and other vegetables. The rules I found are below:
+
+```{r, message=FALSE}
+groc = readLines('groceries.txt')
+baskets = strsplit(groc, split=',', fixed=TRUE)
+
+## Remove duplicates ("de-dupe")
+baskets <- lapply(baskets, unique)
+
+basktrans <- as(baskets, "transactions")
+
+grocrules <- apriori(basktrans, parameter=list(support=.01, confidence=.01, maxlen=4))
+
+## Choose a subset
+inspect(subset(grocrules, subset=lift > 2.75 & confidence > .3))
+
+```
+
+Because many of the fruit and vegetable items are multi-item groups, it is difficult to decipher how exactly some of the item sets are connected, but others are clear. For instance, beef -> root vegetables makes sense. People might be making a beef stew or having steak and potatoes. The general overlap of fruits and vegetables is not surprising either as they are generally located in the same part of the store, so a customer buying one is going to spend time near the other items. The second rule with curds, milk, and yogurt is potentially evidence of the same concept.
